@@ -72,6 +72,18 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual([r["message_id"] for r in mixed["evidence"]["messages"]], ["m1"])
         self.assertEqual([r["message_id"] for r in lending[0]["evidence"]["messages"]], ["m2"])
 
+    def test_title_search_finds_named_chat_and_respects_topic_and_limit(self):
+        with sqlite3.connect(self.history) as db:
+            db.execute("UPDATE conversations SET title='ORGANIZE CHATS ADHD' WHERE id IN ('mixed','other')")
+        self.workspace.sync()
+        before = self.source_hash()
+        found = self.workspace.search("organize chats adhd", limit=1)["results"]
+        self.assertEqual([(r["conversation_id"], r["match_kind"], r["idx"]) for r in found], [("other", "title", 0)])
+        self.assertEqual(self.workspace.search("organize chats adhd", "web-brand")["results"], [])
+        self.workspace.assign("web-brand", "mixed", "included")
+        self.assertEqual([r["conversation_id"] for r in self.workspace.search("organize chats adhd", "web-brand")["results"]], ["mixed"])
+        self.assertEqual(self.source_hash(), before)
+
     def test_manual_exclusion_survives_changed_source(self):
         self.workspace.sync()
         self.workspace.assign("battery-proposals", "mixed", "excluded")

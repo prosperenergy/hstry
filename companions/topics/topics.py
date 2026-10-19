@@ -340,12 +340,28 @@ class Workspace:
                 eligible = {r[0] for r in db.execute("SELECT id FROM chats WHERE present=1")}
         results = []
         with self.source() as src:
+            # Titles are independently searchable: a native display name need
+            # not appear in any message, especially in short imported threads.
+            for row in src.execute("""SELECT id AS conversation_id,title,source_id,metadata
+                    FROM conversations WHERE instr(lower(title),lower(?))>0
+                    ORDER BY coalesce(updated_at,created_at,0) DESC,id""", (query,)):
+                if row["conversation_id"] not in eligible:
+                    continue
+                r = dict(row)
+                r.update(message_id=None, idx=0, rank=None, match_kind="title",
+                         excerpt="Conversation title matches. Open the source to read its messages.",
+                         historical_evidence_only=True)
+                r["source_url"] = source_url(read_json(r.pop("metadata")))
+                results.append(r)
+                if len(results) >= limit:
+                    return {"results": results, "scope": "Indexed HSTRY subset; results are historical evidence."}
+            title_matches = {r["conversation_id"] for r in results}
             cursor = src.execute("""SELECT m.id AS message_id,m.idx,m.conversation_id,c.title,c.source_id,m.content,
                 c.metadata,bm25(messages_fts) AS rank FROM messages_fts
                 JOIN messages m ON m.rowid=messages_fts.rowid JOIN conversations c ON c.id=m.conversation_id
                 WHERE messages_fts MATCH ? ORDER BY rank,m.id""", (fts,))
             for row in cursor:
-                if row["conversation_id"] not in eligible:
+                if row["conversation_id"] not in eligible or row["conversation_id"] in title_matches:
                     continue
                 r = dict(row)
                 r["source_url"] = source_url(read_json(r.pop("metadata")))
