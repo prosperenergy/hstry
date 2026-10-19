@@ -118,6 +118,19 @@ class LocalImportTests(unittest.TestCase):
             apply(self.db, convs, report, self.root / "backups", False)
         self.assertEqual(self.db.read_bytes(), raw)
 
+    def test_wal_source_produces_a_standalone_reusable_checkpoint(self):
+        with sqlite3.connect(self.db) as db:
+            db.execute("PRAGMA journal_mode=WAL")
+            convs, report = self.collect()
+            first = apply(self.db, convs, report, self.root / "backups", False)
+            with sqlite3.connect(Path(first["backup"]).as_uri() + "?mode=ro", uri=True) as backup:
+                self.assertEqual(backup.execute("PRAGMA journal_mode").fetchone()[0], "delete")
+                self.assertEqual(backup.execute("PRAGMA quick_check").fetchone()[0], "ok")
+            self.rows.append(self.message("wal-next", "user", "Append with WAL active"))
+            self.write()
+            convs, report = self.collect()
+            self.assertTrue(apply(self.db, convs, report, self.root / "backups", False)["daily_checkpoint_reused"])
+
     def test_claude_excludes_tool_results_reasoning_and_sidechains(self):
         rows = [{"type": "user", "sessionId": "claude-id", "uuid": "c1", "timestamp": "2026-10-01T10:00:00Z", "message": {"role": "user", "content": "Find the battery plan"}},
                 {"type": "user", "sessionId": "claude-id", "uuid": "c2", "timestamp": "2026-10-01T10:00:00Z", "message": {"role": "user", "content": [{"type": "tool_result", "content": "tool secret"}]}},

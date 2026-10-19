@@ -235,14 +235,17 @@ def apply(history, conversations, report, backup_dir, dry_run=True):
         # archive every five minutes. Appends themselves remain transactional.
         if not reused:
             temporary = backup_path.with_suffix(".tmp")
-            with sqlite3.connect(history.as_uri() + "?mode=ro", uri=True) as src, sqlite3.connect(temporary) as backup:
+            with contextlib.closing(sqlite3.connect(history.as_uri() + "?mode=ro", uri=True)) as src, contextlib.closing(sqlite3.connect(temporary)) as backup:
                 src.backup(backup)
+                # Make the checkpoint self-contained before renaming it; the
+                # source may use WAL, whose sidecars must not follow this copy.
+                backup.execute("PRAGMA journal_mode=DELETE")
                 if backup.execute("PRAGMA quick_check").fetchone()[0] != "ok":
                     raise ValueError("Backup integrity failed")
             temporary.chmod(0o600)
             os.replace(temporary, backup_path)
         else:
-            with sqlite3.connect(backup_path.as_uri() + "?mode=ro", uri=True) as backup:
+            with contextlib.closing(sqlite3.connect(backup_path.as_uri() + "?mode=ro", uri=True)) as backup:
                 if backup.execute("PRAGMA quick_check").fetchone()[0] != "ok":
                     raise ValueError("Daily checkpoint integrity failed")
         for provider, source, cid, conv, count in additions:
