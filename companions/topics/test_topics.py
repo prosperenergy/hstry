@@ -62,6 +62,16 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(self.source_hash(), before)
         self.assertEqual(self.workspace.overview()["reference_entries"], 1)
 
+    def test_refresh_does_not_turn_partial_provider_coverage_into_complete(self):
+        self.assertEqual(self.workspace.overview()["source_coverage"]["overall"], "unverified")
+        coverage = {"overall": "partial", "sources": [{"name": "Cloud account", "status_label": "Export pending"}]}
+        with self.workspace.db() as db:
+            db.execute("INSERT INTO settings VALUES('source_coverage',?)", (json.dumps(coverage),))
+        before = self.source_hash()
+        self.workspace.sync()
+        self.assertEqual(self.workspace.overview()["source_coverage"], coverage)
+        self.assertEqual(self.source_hash(), before)
+
     def test_mixed_topic_message_evidence_is_separate(self):
         self.workspace.sync()
         batteries = self.workspace.chats("battery-proposals")["chats"]

@@ -146,6 +146,22 @@ class LocalImportTests(unittest.TestCase):
             apply(self.db, convs, report, self.root / "backups", False)
         self.assertEqual(self.db.read_bytes(), raw)
 
+    def test_explicit_additional_source_preserves_existing_imports(self):
+        convs, report = self.collect()
+        apply(self.db, convs, report, self.root / "backups", False)
+        with sqlite3.connect(self.db) as db:
+            before = db.execute("SELECT * FROM messages ORDER BY id").fetchall()
+        extra = {"cowork": convs["codex"]}
+        report["roots"]["cowork"] = [str(self.sessions)]
+        report["coverage"]["cowork"] = {"scope": "Explicit visible-text source copy"}
+        result = apply(self.db, extra, report, self.root / "backups", False,
+                       source_ids={"cowork": "cowork-visible"})
+        self.assertEqual(result["messages_added"], 2)
+        with sqlite3.connect(self.db) as db:
+            self.assertTrue(set(before).issubset(set(db.execute("SELECT * FROM messages ORDER BY id").fetchall())))
+        with self.assertRaisesRegex(ValueError, "distinct explicit source"):
+            apply(self.db, extra, report, self.root / "backups", source_ids={"cowork": "same", "other": "same"})
+
     def test_wal_source_produces_a_standalone_reusable_checkpoint(self):
         with sqlite3.connect(self.db) as db:
             db.execute("PRAGMA journal_mode=WAL")

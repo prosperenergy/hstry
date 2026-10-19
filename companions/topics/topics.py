@@ -213,6 +213,7 @@ class Workspace:
                 topics.append(item)
             last = db.execute("SELECT value FROM settings WHERE key='last_sync'").fetchone()
             local_import = db.execute("SELECT value FROM settings WHERE key='local_import'").fetchone()
+            source_coverage = db.execute("SELECT value FROM settings WHERE key='source_coverage'").fetchone()
             sources = [dict(r) for r in db.execute("SELECT source,count(*) AS entries,sum(message_count) AS messages FROM chats WHERE present=1 GROUP BY source ORDER BY source")]
             total = db.execute("SELECT count(*),coalesce(sum(message_count),0),coalesce(sum(reference_only),0) FROM chats WHERE present=1").fetchone()
             unfiled = db.execute("""SELECT count(*) FROM chats c WHERE present=1 AND NOT EXISTS(
@@ -220,6 +221,7 @@ class Workspace:
             return {"topics": topics, "entries": total[0], "messages": total[1], "reference_entries": total[2],
                     "unfiled": unfiled, "last_sync": json.loads(last[0]) if last else None,
                     "sources": sources, "local_import": json.loads(local_import[0]) if local_import else {"enabled": False},
+                    "source_coverage": json.loads(source_coverage[0]) if source_coverage else {"overall": "unverified", "sources": []},
                     "native_changes": {"verified_chatgpt_projects": db.execute("SELECT count(*) FROM native_destinations").fetchone()[0],
                                        "scope": "Only recorded official UI observations; other providers and remaining chats are not verified."},
                     "ai_connection": "Read-only MCP server available; per-client registration is required."}

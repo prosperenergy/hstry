@@ -17,6 +17,11 @@ async function loadOverview() {
     const b = action(t.name, () => choose(t.id)); b.append(node("span", t.entries)); if (t.id === active) b.classList.add("active"); $("topics").append(b);
   }
   $("coverage").textContent = `${overview.entries.toLocaleString()} imported entries · ${overview.messages.toLocaleString()} message records · ${overview.reference_entries} reference entries. Account-wide coverage is not established.`;
+  const coverage = overview.source_coverage;
+  $("source-coverage-summary").textContent = coverage?.overall === "complete" ? "AI source check complete" : coverage?.overall === "partial" ? "Some AI history is still missing — view sources" : "AI source coverage has not been verified";
+  $("source-coverage-list").replaceChildren();
+  if (coverage?.checked_at) $("source-coverage-list").append(node("p", `Source report checked ${new Date(coverage.checked_at).toLocaleString()}.`, "muted"));
+  for (const source of coverage?.sources || []) $("source-coverage-list").append(node("p", `${source.name}: ${source.status_label}. ${source.detail || ""}`, "muted"));
   $("freshness").textContent = overview.last_sync ? `Last checked ${new Date(overview.last_sync.checked_at).toLocaleString()}. ${overview.automatic_refresh ? "Imported history changes are checked every 30 seconds. No model calls." : "Refresh is manual; no startup indexing."}` : "Refresh history to begin.";
   if (overview.local_import?.enabled && overview.automatic_refresh) $("freshness").textContent += " Local Codex and Claude Code sessions refresh every 5 minutes while this workspace runs.";
   if (overview.local_import?.last_error) notice(overview.local_import.last_error);

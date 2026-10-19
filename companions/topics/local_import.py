@@ -223,18 +223,24 @@ def collect(roots, cache):
     return conversations, report
 
 
-def digest_other_sources(db):
+def digest_other_sources(db, source_ids=None):
+    source_ids = source_ids or SOURCES
     result = hashlib.sha256()
-    placeholders = ",".join("?" for _ in SOURCES)
+    placeholders = ",".join("?" for _ in source_ids)
     for sql in ("SELECT * FROM sources WHERE id NOT IN (" + placeholders + ") ORDER BY id",
                 "SELECT * FROM conversations WHERE source_id NOT IN (" + placeholders + ") ORDER BY id",
                 "SELECT m.* FROM messages m JOIN conversations c ON c.id=m.conversation_id WHERE c.source_id NOT IN (" + placeholders + ") ORDER BY m.id"):
-        for row in db.execute(sql, tuple(SOURCES.values())):
+        for row in db.execute(sql, tuple(source_ids.values())):
             result.update(json.dumps(list(row), ensure_ascii=False).encode())
     return result.hexdigest()
 
 
-def apply(history, conversations, report, backup_dir, dry_run=True):
+def apply(history, conversations, report, backup_dir, dry_run=True, source_ids=None):
+    source_ids = source_ids or SOURCES
+    if (set(conversations) - set(source_ids) or not source_ids
+            or len(set(source_ids.values())) != len(source_ids)
+            or any(not isinstance(s, str) or not s for s in source_ids.values())):
+        raise ValueError("Each imported provider requires a distinct explicit source identity")
     history = Path(history).expanduser().resolve()
     if report["errors"]:
         raise ValueError("Source read errors require review before importing")
@@ -243,9 +249,9 @@ def apply(history, conversations, report, backup_dir, dry_run=True):
     additions = []
     try:
         db.execute("BEGIN IMMEDIATE")
-        before = digest_other_sources(db)
+        before = digest_other_sources(db, source_ids)
         for provider, sessions in conversations.items():
-            source = SOURCES[provider]
+            source = source_ids[provider]
             existing_source = db.execute("SELECT adapter FROM sources WHERE id=?", (source,)).fetchone()
             if existing_source and existing_source[0] != "local-visible-copy-v1":
                 raise ValueError("Local import source identity mismatch")
@@ -306,7 +312,7 @@ def apply(history, conversations, report, backup_dir, dry_run=True):
                     json.dumps({"native_message_id": message["native_message_id"], "source_file": conv["source_file"], "historical_evidence_only": True})))
             db.execute("UPDATE conversations SET message_count=(SELECT count(*) FROM messages WHERE conversation_id=?) WHERE id=?", (cid, cid))
             db.execute("UPDATE sources SET last_sync_at=? WHERE id=?", (int(time.time()), source))
-        if digest_other_sources(db) != before:
+        if digest_other_sources(db, source_ids) != before:
             raise ValueError("Unrelated source changed; rolling back")
         if db.execute("PRAGMA quick_check").fetchone()[0] != "ok":
             raise ValueError("Library integrity failed; rolling back")
