@@ -92,8 +92,10 @@ The separate importer copies visible user/assistant text from Codex sessions and
 Claude Code projects into two dedicated HSTRY sources. It excludes tool output,
 reasoning, bootstrap instructions, attachments, and worker sidechains. It never
 changes the original session files. It binds its cache to explicit source roots,
-skips unchanged files, backs up before adding messages, and verifies unrelated
-sources are unchanged. IDs remain stable on repeated and appended imports.
+skips unchanged files, creates a verified daily checkpoint before the first
+write for each library, and verifies unrelated
+sources are unchanged on every transaction. Reusing the daily checkpoint avoids
+copying the entire archive every five minutes. IDs remain stable on repeated and appended imports.
 If a historical message prefix has been rewritten, it stops for review rather
 than overwriting or deleting imported evidence. Missing files are retained in
 the library; this is not a deletion synchronizer.

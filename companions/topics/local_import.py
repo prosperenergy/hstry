@@ -227,13 +227,24 @@ def apply(history, conversations, report, backup_dir, dry_run=True):
             return summary
         backup_dir = Path(backup_dir).expanduser().resolve()
         backup_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        backup_path = backup_dir / ("history-before-local-" + dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ") + ".sqlite")
-        # Backup from a separate read connection while this writer owns the lease.
-        with sqlite3.connect(history.as_uri() + "?mode=ro", uri=True) as src, sqlite3.connect(backup_path) as backup:
-            src.backup(backup)
-            if backup.execute("PRAGMA quick_check").fetchone()[0] != "ok":
-                raise ValueError("Backup integrity failed")
-        backup_path.chmod(0o600)
+        library_id = hashlib.sha256(str(history).encode()).hexdigest()[:12]
+        day = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d")
+        backup_path = backup_dir / ("history-before-local-" + day + "-" + library_id + ".sqlite")
+        reused = backup_path.exists()
+        # One verified checkpoint per library/day avoids copying the whole
+        # archive every five minutes. Appends themselves remain transactional.
+        if not reused:
+            temporary = backup_path.with_suffix(".tmp")
+            with sqlite3.connect(history.as_uri() + "?mode=ro", uri=True) as src, sqlite3.connect(temporary) as backup:
+                src.backup(backup)
+                if backup.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+                    raise ValueError("Backup integrity failed")
+            temporary.chmod(0o600)
+            os.replace(temporary, backup_path)
+        else:
+            with sqlite3.connect(backup_path.as_uri() + "?mode=ro", uri=True) as backup:
+                if backup.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+                    raise ValueError("Daily checkpoint integrity failed")
         for provider, source, cid, conv, count in additions:
             db.execute("INSERT OR IGNORE INTO sources(id,adapter,path,config) VALUES(?,?,?,?)", (
                 source, "local-visible-copy-v1", json.dumps(report["roots"][provider]),
@@ -256,7 +267,7 @@ def apply(history, conversations, report, backup_dir, dry_run=True):
         if db.execute("PRAGMA quick_check").fetchone()[0] != "ok":
             raise ValueError("Library integrity failed; rolling back")
         db.commit()
-        summary.update(backup=str(backup_path), unrelated_sources_unchanged=True)
+        summary.update(backup=str(backup_path), daily_checkpoint_reused=reused, unrelated_sources_unchanged=True)
         return summary
     finally:
         db.rollback()

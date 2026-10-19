@@ -102,6 +102,8 @@ class LocalImportTests(unittest.TestCase):
         convs, report = self.collect()
         appended = apply(self.db, convs, report, self.root / "backups", False)
         self.assertEqual(appended["messages_added"], 1)
+        self.assertTrue(appended["daily_checkpoint_reused"])
+        self.assertEqual([p.resolve() for p in (self.root / "backups").glob("*.sqlite")], [Path(first["backup"])])
         with sqlite3.connect(self.db) as db:
             self.assertTrue(set(anchors).issubset(set(db.execute("SELECT id FROM messages").fetchall())))
 
