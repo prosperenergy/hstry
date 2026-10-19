@@ -86,8 +86,47 @@ does not patch provider databases, move transcripts, or send prompts. The existi
 local title organizer remains its own writer. Only the recorded native changes
 have established coverage; other apps and remaining chats stay unverified.
 
-No Supabase schema, background indexer, login job, or automatic customer messages
-are installed. Existing HSTRY and Episodic Memory settings are preserved.
+## Optional local session imports
+
+The separate importer copies visible user/assistant text from Codex sessions and
+Claude Code projects into two dedicated HSTRY sources. It excludes tool output,
+reasoning, bootstrap instructions, attachments, and worker sidechains. It never
+changes the original session files. It binds its cache to explicit source roots,
+skips unchanged files, backs up before adding messages, and verifies unrelated
+sources are unchanged. IDs remain stable on repeated and appended imports.
+If a historical message prefix has been rewritten, it stops for review rather
+than overwriting or deleting imported evidence. Missing files are retained in
+the library; this is not a deletion synchronizer.
+
+```sh
+python3 companions/topics/local_import.py --history /path/to/history.db \
+  --cache ~/.local/share/hstry-topics/local-import
+# Review the dry run, then repeat with --apply.
+```
+
+For opt-in refresh while the dashboard runs, save `local-import-config.json`
+beside the workspace SQLite file:
+
+```json
+{
+  "enabled": true,
+  "history": "/path/to/history.db",
+  "roots": {
+    "codex": ["/path/to/.codex/sessions", "/path/to/.codex/archived_sessions"],
+    "claude-code": ["/path/to/.claude/projects"]
+  }
+}
+```
+
+Explicit launch and **Refresh history** then import local changes before updating
+topics. While the dashboard watcher runs, local sessions refresh every five
+minutes. MCP startup remains read-only and never invokes the importer. Set
+`enabled` to false to disable local imports; existing indexed history remains.
+Cloud-only provider conversations require their own supported export/import path.
+The importer is the only new HSTRY writer; topic retrieval always stays read-only.
+
+No Supabase schema, login job, or automatic customer messages are installed.
+Existing HSTRY and Episodic Memory settings are preserved.
 
 ```sh
 python3 -m unittest discover -s companions/topics -v

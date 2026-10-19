@@ -18,6 +18,8 @@ async function loadOverview() {
   }
   $("coverage").textContent = `${overview.entries.toLocaleString()} imported entries · ${overview.messages.toLocaleString()} message records · ${overview.reference_entries} reference entries. Account-wide coverage is not established.`;
   $("freshness").textContent = overview.last_sync ? `Last checked ${new Date(overview.last_sync.checked_at).toLocaleString()}. ${overview.automatic_refresh ? "Imported history changes are checked every 30 seconds. No model calls." : "Refresh is manual; no startup indexing."}` : "Refresh history to begin.";
+  if (overview.local_import?.enabled && overview.automatic_refresh) $("freshness").textContent += " Local Codex and Claude Code sessions refresh every 5 minutes while this workspace runs.";
+  if (overview.local_import?.last_error) notice(overview.local_import.last_error);
 }
 async function choose(id) {
   active = id; context = null; selected = new Set(); offset = 0; $("search").value = "";

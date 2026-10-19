@@ -5,11 +5,19 @@ from pathlib import Path
 import secrets
 import sqlite3
 import threading
+import time
 from urllib.parse import parse_qs, urlparse
 
 
-def make_server(workspace, port=8767, watch=False, interval=30):
+def make_server(workspace, port=8767, watch=False, interval=30, local_interval=300):
     token = secrets.token_urlsafe(32)
+    refresh_lock = threading.Lock()
+
+    def refresh():
+        with refresh_lock:
+            from local_import import configured_refresh
+            configured_refresh(workspace)
+            return workspace.sync()
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -100,7 +108,7 @@ def make_server(workspace, port=8767, watch=False, interval=30):
                 if not isinstance(body, dict):
                     raise ValueError("Expected an object")
                 if self.path == "/api/sync":
-                    result = workspace.sync()
+                    result = refresh()
                 elif self.path == "/api/topic":
                     result = workspace.add_topic(body["name"], body["terms"])
                 elif self.path == "/api/assign":
@@ -135,14 +143,26 @@ def make_server(workspace, port=8767, watch=False, interval=30):
 
         def refresh_changes():
             previous = signature()
+            local_checked = time.monotonic()
             while not server.watch_stop.wait(interval):
                 current = signature()
-                if current != previous:
+                local_due = time.monotonic() - local_checked >= local_interval
+                if current != previous or local_due:
                     try:
-                        workspace.sync()
-                        previous = current
+                        if local_due:
+                            refresh()
+                            local_checked = time.monotonic()
+                        else:
+                            with refresh_lock:
+                                workspace.sync()
+                        previous = signature()
                     except (ValueError, OSError, sqlite3.Error):
                         # Keep the last complete index; retry on the next tick.
+                        with workspace.db() as db:
+                            row = db.execute("SELECT value FROM settings WHERE key='local_import'").fetchone()
+                            state = json.loads(row[0]) if row else {}
+                            state["last_error"] = "Automatic refresh needs review; the last complete library is retained."
+                            db.execute("INSERT OR REPLACE INTO settings VALUES('local_import',?)", (json.dumps(state),))
                         continue
 
         worker = threading.Thread(target=refresh_changes, daemon=True)

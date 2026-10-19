@@ -38,6 +38,8 @@ def main():
 
     if not running():
         # Explicit launch refreshes the imported subset once; MCP startups do not.
+        from local_import import configured_refresh
+        configured_refresh(workspace)
         result = workspace.sync()
         print("History checked: " + str(result["entries"]) + " entries; " + str(result["changed"]) + " changed.")
         log = workspace.state.parent / "dashboard.log"
