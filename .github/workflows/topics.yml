@@ -1,0 +1,17 @@
+name: Topic workspace
+on:
+  push:
+    paths: ['companions/topics/**', '.github/workflows/topics.yml']
+  pull_request:
+    paths: ['companions/topics/**', '.github/workflows/topics.yml']
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify topic storage, retrieval, and access boundaries
+        run: python3 -m unittest discover -s companions/topics -v
+      - name: Check browser script syntax
+        run: node --check companions/topics/app.js
