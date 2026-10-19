@@ -81,6 +81,34 @@ class LocalImportTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "different source roots"):
             collect({"codex": [self.root]}, self.root / "cache")
 
+    def test_context_tags_do_not_become_display_titles(self):
+        self.rows.insert(2, self.message("ambient", "user", '<external_codex_apps_open_page>{"page_id":null}</external_codex_apps_open_page>'))
+        self.write()
+        conv = parse_session(self.path, "codex")
+        self.assertEqual(conv["title"], "[Local codex] Battery project status")
+        # The historical message remains intact; only the derived label changes.
+        self.assertTrue(conv["messages"][0]["content"].startswith("<external_codex_apps_open_page>"))
+
+    def test_display_name_refreshes_cached_chat_without_rewriting_messages(self):
+        convs, report = self.collect()
+        apply(self.db, convs, report, self.root / "backups", False)
+        with sqlite3.connect(self.db) as db:
+            before = db.execute("SELECT * FROM messages ORDER BY id").fetchall()
+        native = self.root / "state_5.sqlite"
+        with sqlite3.connect(native) as db:
+            db.executescript("CREATE TABLE threads(id TEXT,title TEXT,name TEXT);")
+            db.execute("INSERT INTO threads VALUES(?,?,?)", ("native-id", "Old title", "Chat Organizer"))
+        native_bytes = native.read_bytes()
+        convs, report = self.collect()
+        self.assertEqual(report["unchanged"], 1)
+        result = apply(self.db, convs, report, self.root / "backups", False)
+        self.assertEqual((result["sessions_changed"], result["messages_added"]), (1, 0))
+        with sqlite3.connect(self.db) as db:
+            self.assertEqual(db.execute("SELECT title FROM conversations WHERE source_id!='existing'").fetchone(), ("[Local codex] Chat Organizer",))
+            self.assertEqual(db.execute("SELECT * FROM messages ORDER BY id").fetchall(), before)
+        self.assertEqual(native.read_bytes(), native_bytes)
+        self.assertEqual(apply(self.db, convs, report, self.root / "backups", False)["sessions_changed"], 0)
+
     def test_dry_run_backup_append_idempotence_and_unrelated_sources(self):
         convs, report = self.collect()
         with sqlite3.connect(self.db) as db:

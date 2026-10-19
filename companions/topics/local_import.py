@@ -68,6 +68,38 @@ def bootstrap(content):
         "The conversation history before this point was compacted", "<environment_context>"))
 
 
+def derived_title(messages, provider):
+    for message in messages:
+        if message["role"] != "user":
+            continue
+        text = message["content"].strip()
+        if text.startswith(("<external_codex_apps_open_page>", "<skill>", "<turn_aborted>")):
+            continue
+        if "## My request:" in text:
+            text = text.split("## My request:", 1)[1].strip()
+        if text and not text.startswith("<"):
+            return "[Local " + provider + "] " + " ".join(text.split())[:100]
+    return "[Local " + provider + "] Local conversation"
+
+
+def codex_titles(roots):
+    """Read display names only from state databases beside configured roots."""
+    titles = {}
+    databases = {Path(root).parent / "state_5.sqlite" for root in roots
+                 if Path(root).name in ("sessions", "archived_sessions")}
+    for path in sorted(databases):
+        if not path.is_file():
+            continue
+        with contextlib.closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as db:
+            for identity, title, name in db.execute("SELECT id,title,name FROM threads"):
+                value = (name or title or "").strip()
+                if value:
+                    if identity in titles and titles[identity][0] != value:
+                        raise ValueError("Conflicting local display names for one session")
+                    titles[identity] = (value, str(path))
+    return titles
+
+
 def parse_session(path, provider):
     messages, thread_id, created, workspace = [], None, None, None
     skipped, incomplete = 0, False
@@ -128,8 +160,7 @@ def parse_session(path, provider):
     if not thread_id or not created:
         raise ValueError("Session has no established identity or date")
     # This is a derived label, not a rename or a claimed original provider title.
-    first = next((m["content"] for m in messages if m["role"] == "user"), "Local conversation")
-    title = "[Local " + provider + "] " + " ".join(first.split())[:100]
+    title = derived_title(messages, provider)
     return {"id": thread_id, "created_at": created, "updated_at": max(
         m["created_at"] or created for m in messages), "workspace": workspace,
         "title": title, "messages": messages, "source_file": str(path),
@@ -149,6 +180,7 @@ def collect(roots, cache):
               "roots": binding, "coverage": {}, "model_calls": 0}
     conversations = {provider: {} for provider in roots}
     for provider, paths in binding.items():
+        titles = codex_titles(paths) if provider == "codex" else {}
         found = sorted({p for root in paths for p in Path(root).rglob("*.jsonl")})
         for path in found:
             key = hashlib.sha256(str(path).encode()).hexdigest()
@@ -171,6 +203,12 @@ def collect(roots, cache):
                     report["excluded_files"].append(str(path))
                     report["files"][str(path)] = {"signature": signature, "partial_tail_pending": False}
                     continue
+                conv["title"] = derived_title(conv["messages"], provider)
+                conv["title_source_file"] = None
+                if conv["id"] in titles:
+                    title, source_file = titles[conv["id"]]
+                    conv["title"] = "[Local " + provider + "] " + title
+                    conv["title_source_file"] = source_file
                 existing = conversations[provider].get(conv["id"])
                 if existing and existing["messages"] != conv["messages"]:
                     raise ValueError("Conflicting copies of one session identity")
@@ -212,13 +250,15 @@ def apply(history, conversations, report, backup_dir, dry_run=True):
             if existing_source and existing_source[0] != "local-visible-copy-v1":
                 raise ValueError("Local import source identity mismatch")
             for conv in sessions.values():
-                row = db.execute("SELECT id FROM conversations WHERE source_id=? AND external_id=?", (source, conv["id"])).fetchone()
+                row = db.execute("SELECT id,title,metadata FROM conversations WHERE source_id=? AND external_id=?", (source, conv["id"])).fetchone()
                 cid = row[0] if row else str(uuid.uuid5(uuid.NAMESPACE_URL, source + ":" + conv["id"]))
                 old = db.execute("SELECT idx,role,content FROM messages WHERE conversation_id=? ORDER BY idx", (cid,)).fetchall()
                 prefix = [(i, m["role"], m["content"]) for i, m in enumerate(conv["messages"][:len(old)])]
                 if old != prefix:
                     raise ValueError("Imported message prefix changed; preserving existing evidence")
-                if not row or len(old) < len(conv["messages"]):
+                old_meta = json.loads(row[2] or "{}") if row else {}
+                if (not row or len(old) < len(conv["messages"]) or row[1] != conv["title"]
+                        or old_meta.get("title_source_file") != conv.get("title_source_file")):
                     additions.append((provider, source, cid, conv, len(old)))
         summary = {"sessions_changed": len(additions), "messages_added": sum(len(c["messages"]) - n for _, _, _, c, n in additions),
                    "dry_run": dry_run, "model_calls": 0}
@@ -253,10 +293,11 @@ def apply(history, conversations, report, backup_dir, dry_run=True):
                 source, "local-visible-copy-v1", json.dumps(report["roots"][provider]),
                 json.dumps({"scope": report["coverage"][provider]["scope"]})))
             meta = {"native_thread_id": conv["id"], "source_file": conv["source_file"],
-                    "source_kind": "local-visible-session-copy", "title_is_derived": True,
+                    "source_kind": "local-visible-session-copy", "title_is_derived": not bool(conv.get("title_source_file")),
+                    "title_source_file": conv.get("title_source_file"),
                     "source_scope": report["coverage"][provider]["scope"], "copied_at": report["checked_at"]}
             db.execute("""INSERT INTO conversations(id,source_id,external_id,title,created_at,updated_at,workspace,metadata,provider,harness)
-                VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at,metadata=excluded.metadata,version=conversations.version+1""",
+                VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,updated_at=excluded.updated_at,metadata=excluded.metadata,version=conversations.version+1""",
                 (cid, source, conv["id"], conv["title"], conv["created_at"], conv["updated_at"], conv["workspace"], json.dumps(meta), provider, provider))
             for idx, message in enumerate(conv["messages"][count:], count):
                 mid = str(uuid.uuid5(uuid.NAMESPACE_URL, source + ":" + conv["id"] + ":" + str(idx)))
