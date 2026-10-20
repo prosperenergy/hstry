@@ -27,14 +27,26 @@ def import_lease(cache):
     cache = Path(cache)
     cache.mkdir(parents=True, exist_ok=True, mode=0o700)
     lease = cache / ".refresh-lock"
-    try:
-        lease.mkdir(mode=0o700)
-    except FileExistsError:
+    if lease.exists():
         raise ValueError("A local import is already running; retry after it finishes")
+    handle = os.open(cache / ".refresh.lock", os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        if os.name == "nt":
+            import msvcrt
+            if os.fstat(handle).st_size == 0:
+                os.write(handle, b"0")
+            os.lseek(handle, 0, os.SEEK_SET)
+            msvcrt.locking(handle, msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(handle)
+        raise ValueError("A local import is already running; retry after it finishes") from None
     try:
         yield
     finally:
-        lease.rmdir()
+        os.close(handle)
 
 
 def private_json(path, value):
@@ -324,7 +336,7 @@ def apply(history, conversations, report, backup_dir, dry_run=True, source_ids=N
         db.close()
 
 
-def configured_refresh(workspace):
+def configured_refresh(workspace, background=False):
     """Opt-in importer for explicit dashboard refresh or its running watcher."""
     config_path = workspace.state.parent / "local-import-config.json"
     if not config_path.exists():
@@ -332,6 +344,8 @@ def configured_refresh(workspace):
     config = json.loads(config_path.read_text())
     if config.get("enabled") is not True:
         return {"enabled": False}
+    if config.get("background_only") is True and not background:
+        return {"enabled": True, "managed_by": "background collector", "refresh_seconds": 300}
     if Path(config["history"]).expanduser().resolve() != workspace.history:
         raise ValueError("Local import configuration belongs to a different library")
     roots = config["roots"]

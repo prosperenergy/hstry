@@ -11,6 +11,19 @@ LaunchAgent so the browser and chat app need not stay open. It does not invoke
 models, reindex at every AI boot, or delete original chats. This requires the
 Mac to be awake, logged in, online, and able to read its configured sources.
 
+Cowork refresh uses metadata/transcript file stats to parse changed sessions;
+other adapters reuse a verified prepared snapshot when source file stats are
+unchanged. Parser code changes invalidate those caches. The installed collector
+owns local imports so an open dashboard does not run a second importer. OS file
+locks release after process death instead of leaving a permanent stale lock.
+
+Keep the working library in private app-data storage, such as
+$XDG_DATA_HOME/hstry-topics/history/history.db. On macOS, unattended jobs may be
+denied access to a library saved in Documents even when the interactive app can
+read it. Relocation must preserve the original, verify a consistent SQLite
+backup, and update the workspace, launchers and each MCP registration together.
+Running AI clients require a reload to consume a changed MCP registration.
+
 Copy background.example.json outside the repository and set the actual source
 paths. Remove adapter_config if unused. Each device needs a distinct collector_id
 and runs its own local installer. Remote GUI control is unnecessary.
@@ -52,3 +65,5 @@ are copied with their saved date and stale-review flag.
 
 Uninstall the scheduler reversibly with launchctl bootout on the installed job,
 then remove only its own LaunchAgent plist. Keep the library and source files.
+Remove background_only from local-import-config.json to return importer ownership
+to the dashboard watcher.

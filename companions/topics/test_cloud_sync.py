@@ -112,12 +112,96 @@ class CloudSyncTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             sync(self.workspace, dict(self.config, collector_id="other-mac"), self.cache, True)
 
+    def test_background_dry_run_never_starts_collection(self):
+        import background
+        config = self.fixture.root / "background.json"
+        config.write_text(json.dumps({"history": str(self.fixture.history), "state": str(self.fixture.state)}))
+        with mock.patch("background.configured_refresh") as collect:
+            result = background.run(config, False)
+        collect.assert_not_called()
+        self.assertEqual(result["status"], "dry_run")
+        self.assertFalse(result["all_ai_complete"])
+
+    def test_background_failure_retains_private_redacted_diagnostics(self):
+        import background
+        import sqlite3
+        config = self.fixture.root / "background.json"
+        config.write_text(json.dumps({"history": str(self.fixture.history), "state": str(self.fixture.state)}))
+        before = self.fixture.source_hash()
+        with mock.patch("background.configured_refresh", side_effect=sqlite3.DatabaseError("authorization denied sk-" + "s" * 30)):
+            with self.assertRaises(RuntimeError):
+                background.run(config, True)
+        result = json.loads((self.fixture.state.parent / "background-status.json").read_text())
+        self.assertEqual((result["status"], result["error_type"]), ("failed", "DatabaseError"))
+        self.assertEqual(result["error"], "authorization denied [credential redacted]")
+        self.assertEqual(before, self.fixture.source_hash())
+
     def test_launch_agent_runs_without_browser_or_secret_in_arguments(self):
         value = definition("/private/config.json", "/private/state", "/usr/bin/python3")
         self.assertEqual((value["StartInterval"], value["RunAtLoad"]), (300, True))
         self.assertIn("--apply", value["ProgramArguments"])
         self.assertNotIn("serve", value["ProgramArguments"])
         self.assertNotIn("TOKEN", canonical(value))
+
+
+
+    def test_cowork_skips_known_sessions_but_detects_transcript_changes(self):
+        from adapter_import import cowork_plan
+        root = self.fixture.root / "cowork"
+        meta = root / "account/org/local_one.json"
+        meta.parent.mkdir(parents=True)
+        meta.write_text("{}")
+        transcript = meta.with_suffix("") / ".claude/projects/project/session.jsonl"
+        transcript.parent.mkdir(parents=True)
+        transcript.write_text("first\n")
+        previous = {"one": {"source_file": str(meta), "messages": []}}
+        report = {"checked_at": "2099-01-01T00:00:00+00:00"}
+        retained, selected, signatures, count = cowork_plan(root, previous, report, "cowork")
+        self.assertEqual((retained, selected, count), (previous, [], 1))
+        report["cowork_files"] = {"cowork": signatures}
+        transcript.write_text("first\nsecond\n")
+        self.assertEqual(cowork_plan(root, previous, report, "cowork")[1], [meta])
+        unknown = meta.with_name("local_new.json")
+        unknown.write_text("{}")
+        os.utime(unknown, (1, 1))
+        self.assertIn(unknown, cowork_plan(root, previous, report, "cowork")[1])
+
+    def test_source_stat_cache_detects_same_timestamp_size_changes(self):
+        from adapter_import import source_signature
+        root = self.fixture.root / "provider"
+        root.mkdir()
+        path = root / "history.json"
+        path.write_text("first")
+        before = path.stat()
+        first = source_signature(root)
+        self.assertEqual(first, source_signature(root))
+        path.write_text("longer content")
+        os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+        self.assertNotEqual(first, source_signature(root))
+
+    def test_import_lease_recovers_after_process_exit(self):
+        import subprocess
+        import sys
+        from local_import import import_lease
+        cache = self.fixture.root / "crash-lease"
+        script = "import os,sys;sys.path.insert(0,sys.argv[1]);from local_import import import_lease\nwith import_lease(sys.argv[2]):os._exit(0)"
+        subprocess.run([sys.executable, "-c", script, str(Path(cloud_sync.__file__).parent), str(cache)], check=True)
+        with import_lease(cache):
+            pass
+
+    def test_dashboard_defers_imports_to_installed_background_owner(self):
+        import background
+        from local_import import configured_refresh
+        path = self.fixture.state.parent / "local-import-config.json"
+        path.write_text(json.dumps({"enabled": True, "history": str(self.fixture.history), "background_only": True}))
+        with mock.patch("local_import.collect") as collect:
+            self.assertEqual(configured_refresh(self.workspace)["managed_by"], "background collector")
+        collect.assert_not_called()
+        config = self.fixture.root / "background.json"
+        config.write_text(json.dumps({"history": str(self.fixture.history), "state": str(self.fixture.state)}))
+        with mock.patch("background.configured_refresh", return_value={"enabled": False}) as collect:
+            self.assertEqual(background.run(config, True)["status"], "success")
+        self.assertTrue(collect.call_args.kwargs["background"])
 
 
 if __name__ == "__main__":

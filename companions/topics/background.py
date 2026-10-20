@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from adapter_import import run as import_adapters
-from cloud_sync import sync as cloud_sync
+from cloud_sync import sync as cloud_sync, scrub
 from local_import import configured_refresh, private_json
 from topics import Workspace, now
 
@@ -28,22 +28,30 @@ def run(config_path, apply=False):
             status["stages"]["cloud"] = bool(config.get("cloud"))
             return status
         try:
-            status["stages"]["local"] = configured_refresh(workspace)
+            status["active_stage"] = "local"
+            private_json(status_path, status)
+            status["stages"]["local"] = configured_refresh(workspace, background=True)
             if config.get("adapter_config"):
+                status["active_stage"] = "adapters"
+                private_json(status_path, status)
                 status["stages"]["adapters"] = import_adapters(
                     workspace.history, config["adapter_config"],
                     workspace.state.parent / "background-adapters", config.get("bun", "bun"), False)
+            status["active_stage"] = "topics"
+            private_json(status_path, status)
             status["stages"]["topics"] = workspace.sync()
             if config.get("cloud"):
                 status["stages"]["cloud"] = cloud_sync(
                     workspace, config["cloud"], workspace.state.parent / "cloud-sync", True)
             status["status"] = "success"
+            status["active_stage"] = "complete"
             status["completed_at"] = now()
             private_json(status_path, status)
             return status
         except Exception as exc:
             status["status"] = "failed"
             status["error_type"] = type(exc).__name__
+            status["error"] = scrub(str(exc))[:400]
             status["completed_at"] = now()
             private_json(status_path, status)
             raise RuntimeError("Background refresh failed; previous cloud data retained. See background-status.json.") from None
