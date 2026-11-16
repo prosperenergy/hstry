@@ -1,0 +1,14 @@
+{
+  "history": "/absolute/path/to/history.db",
+  "state": "/absolute/path/to/workspace.sqlite",
+  "adapter_config": "/absolute/path/to/adapter-sources.json",
+  "bun": "/opt/homebrew/bin/bun",
+  "cloud": {
+    "endpoint": "https://brain.example.com/api/chat-library/sync",
+    "expected_host": "brain.example.com",
+    "collector_id": "macbook",
+    "project_ref": "abcdefghijklmnopqrst",
+    "token_env": "HSTRY_BRAIN_SYNC_TOKEN",
+    "token_file": "/absolute/path/to/private-brain-upload-token"
+  }
+}

@@ -2474,11 +2474,7 @@ fn is_system_context(content: &str) -> bool {
     }
 
     // Check for AGENTS.md file path pattern
-    if content.contains("AGENTS.md") && content.contains("instructions") {
-        return true;
-    }
-
-    false
+    content.contains("AGENTS.md") && content.contains("instructions")
 }
 
 /// Detect a resume/compaction continuation fragment whose first user message is

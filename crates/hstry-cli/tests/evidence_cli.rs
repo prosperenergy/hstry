@@ -58,8 +58,10 @@ fn output(mut command: Command) -> anyhow::Result<Value> {
     let r = command.output()?;
     anyhow::ensure!(
         r.status.success(),
-        "CLI failed: {}",
-        String::from_utf8_lossy(&r.stderr)
+        "CLI failed (status {}): stderr={} stdout={}",
+        r.status,
+        String::from_utf8_lossy(&r.stderr),
+        String::from_utf8_lossy(&r.stdout)
     );
     Ok(serde_json::from_slice(&r.stdout)?)
 }
