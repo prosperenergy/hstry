@@ -10,7 +10,7 @@ use crate::paths::service_port_path;
 #[expect(clippy::allow_attributes)]
 // ast-grep-ignore: rust-no-clippy-allow
 #[expect(clippy::default_trait_access)]
-#[expect(clippy::double_must_use)]
+#[allow(clippy::double_must_use)]
 pub mod proto {
     tonic::include_proto!("hstry.service");
 }
