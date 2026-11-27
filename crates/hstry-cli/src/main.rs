@@ -988,8 +988,29 @@ fn default_log_filter(verbose: u8) -> &'static str {
     }
 }
 
+fn main() -> Result<()> {
+    // Windows reserves 1 MiB for the process main thread. Unix defaults to
+    // 8 MiB. `Cli::parse()` (the derived clap parser) uses more than 1 MiB of
+    // stack, so the binary aborts with "thread 'main' has overflowed its
+    // stack" before any subcommand runs. Dispatch from an 8 MiB thread on
+    // Windows, matching the Unix main-thread budget.
+    if cfg!(windows) {
+        match std::thread::Builder::new()
+            .name("hstry".to_owned())
+            .stack_size(8 * 1024 * 1024)
+            .spawn(cli_main)?
+            .join()
+        {
+            Ok(result) => result,
+            Err(payload) => std::panic::resume_unwind(payload),
+        }
+    } else {
+        cli_main()
+    }
+}
+
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn cli_main() -> Result<()> {
     let cli = Cli::parse();
 
     if cli.no_color {
