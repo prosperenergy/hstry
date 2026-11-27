@@ -34,10 +34,10 @@ jobs:
             os: ubuntu-latest
             archive: tar.gz
           - target: x86_64-apple-darwin
-            os: macos-14
+            os: macos-15
             archive: tar.gz
           - target: aarch64-apple-darwin
-            os: macos-14
+            os: macos-15
             archive: tar.gz
 
     steps:
@@ -57,7 +57,7 @@ jobs:
           sudo apt-get install -y protobuf-compiler
 
       - name: Install protoc (macOS)
-        if: matrix.os == 'macos-14'
+        if: matrix.os == 'macos-15'
         run: brew install protobuf
 
       - name: Setup cross-compilation for aarch64 Linux
